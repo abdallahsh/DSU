@@ -26,7 +26,7 @@ export class BrowserService {
         try {
             const { page, browser } = await connect({
                 args: config.browser.args,
-                headless: true,
+                headless: false,
                 turnstile: true,
                 customConfig: {
                     ignoreDefaultArgs: ['--enable-automation'],
