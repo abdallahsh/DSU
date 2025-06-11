@@ -1,7 +1,6 @@
 import MainScraper from "./services/mainScraper.service.js";
 import { logger } from "./utils/common.js";
 import { cache } from "./utils/redis.cash.js";
-import http from 'http';
 
 class Application {
     constructor() {
@@ -92,6 +91,8 @@ const healthServer = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'OK',
+      instanceType: process.env.INSTANCE_TYPE || 'unknown',
+      isActive: app?.scheduler?.isActive || false,
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       memory: process.memoryUsage()

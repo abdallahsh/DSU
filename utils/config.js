@@ -1,8 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-const isProd = process.env.NODE_ENV === 'production';
-
 export const config = {
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
@@ -10,49 +8,39 @@ export const config = {
     username: process.env.REDIS_USERNAME || '',
     password: process.env.REDIS_PASSWORD || '',
     db: parseInt(process.env.REDIS_DB) || 0,
-    keyPrefix: isProd ? 'prod:genie:scraped:' : 'dev:genie:scraped:',
-    jobBatchSize: isProd ? 10 : 5, // Increased batch size for production
-    // Connection settings for production
-    tls: isProd ? { rejectUnauthorized: false } : undefined,
-    retryStrategy: (times) => Math.min(times * 200, 3000),
-    maxRetriesPerRequest: isProd ? 5 : 3,
+    keyPrefix: 'genie:scraped:',
+    jobBatchSize: 5, // Number of jobs to process before saving to Redis
   },
   browser: {
-    chromePath: isProd ? '/usr/bin/google-chrome' : process.env.CHROME_PATH,
-    userAgent: process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-    viewport: { width: 1920, height: 1080 },
+    chromePath: process.env.CHROME_PATH,
+    userAgent: process.env.USER_AGENT,
+    viewport: { width: 1280, height: 800 },
     baseUrl: 'https://www.upwork.com',
     loginUrl: 'https://www.upwork.com/ab/account-security/login',
     jobsUrl: 'https://www.upwork.com/nx/search/jobs/?client_hires=1-9,10-&per_page=20&sort=recency',
-    email: process.env.UPWORK_EMAIL || process.env.EMAIL,
-    password: process.env.UPWORK_PASSWORD || process.env.PASSWORD,
+    email: process.env.EMAIL,
+    password: process.env.PASSWORD,
     args: [
-      "--no-sandbox", // Required for running Chrome in Linux without sandbox
-      "--disable-setuid-sandbox", // Required for running Chrome in Linux
+      "--start-maximized",
+      "--disable-notifications",
       "--disable-dev-shm-usage",
       "--disable-accelerated-2d-canvas",
       "--disable-gpu",
-      "--disable-notifications",
       "--disable-infobars",
       "--disable-blink-features=AutomationControlled",
       "--disable-extensions",
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-popup-blocking",
-      "--window-size=1920,1080",
-      "--ignore-certificate-errors",
-      "--ignore-certificate-errors-spki-list",
-      ...(isProd ? ["--headless=new"] : []), // Use headless in production
     ],
-    defaultTimeout: isProd ? 45000 : 60000,
-    navigationTimeout: isProd ? 60000 : 90000,
+    defaultTimeout: 60000,
+    navigationTimeout: 90000,
     connectOptions: {
       defaultViewport: null,
-      timeout: isProd ? 90000 : 120000,
-      protocolTimeout: 60000,
+      timeout: 120000
     },
-    userDataDir: isProd ? '/home/ec2-user/app/user_data' : './user_data',
-    headless: isProd ? true : process.env.HEADLESS === 'false',
+    userDataDir: './user_data',
+    headless: process.env.HEADLESS === 'false',
   },
   scraper: {
     maxRetries: 3,

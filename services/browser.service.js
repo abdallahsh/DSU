@@ -26,7 +26,7 @@ export class BrowserService {
         try {
             const { page, browser } = await connect({
                 args: config.browser.args,
-                headless: true,
+                headless: false,
                 turnstile: true,
                 customConfig: {
                     ignoreDefaultArgs: ['--enable-automation'],
@@ -57,14 +57,29 @@ export class BrowserService {
         try {
             logger.info('Starting URL extraction process...');
             
-            // Wait for the job cards to appear
-            await this.page.waitForSelector('a[href*="/jobs/"]', { 
-                timeout: 10000,
-                visible: true 
-            });
+            // Wait for either job cards or job links to appear with a longer timeout
+            const jobElementPromises = [
+                this.page.waitForSelector('[data-test="job-tile"]', { 
+                    timeout: 30000,
+                    visible: true 
+                }).catch(() => null),
+                this.page.waitForSelector('a[href*="/jobs/"]', { 
+                    timeout: 30000,
+                    visible: true 
+                }).catch(() => null)
+            ];
             
-            // Additional delay to ensure full page load
-            await browserUtils.randomDelay(1000, 2000);
+            const results = await Promise.all(jobElementPromises);
+            if (!results[0] && !results[1]) {
+                logger.warn('No job elements found on the page');
+                // Validate if we're actually on the correct page
+                const currentUrl = await this.page.url();
+                logger.debug('Current URL:', currentUrl);
+                return [];
+            }
+            
+            // Additional delay to ensure dynamic content is loaded
+            await browserUtils.randomDelay(2000, 3000);
             
             // Extract urls using multiple selector strategies with visited state check
             const urls = await this.page.evaluate(() => {
@@ -196,15 +211,27 @@ export class BrowserService {
         let retries = 0;
         while (retries < config.scraper.maxRetries) {
             try {
-                // Set a more reasonable timeout for initial navigation
+                // First attempt with just domcontentloaded for faster initial load
                 const navigationOptions = {
-                    waitUntil: ['domcontentloaded', 'networkidle0'],
-                    timeout: 60000, // 60 seconds instead of 90
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000,
                     ...options
                 };
 
                 // Navigate to page
                 await this.page.goto(url, navigationOptions);
+                
+                // Wait for network to settle with a separate timeout
+                try {
+                    await this.page.waitForNavigation({ 
+                        waitUntil: 'networkidle0',
+                        timeout: 30000
+                    }).catch(() => {
+                        logger.debug('Network did not reach idle state - continuing anyway');
+                    });
+                } catch (networkError) {
+                    logger.debug('Network timeout occurred, but page might be usable');
+                }
                 
                 // Wait for page to be fully loaded
                 // await this.page.waitForFunction(() => {
@@ -239,8 +266,44 @@ export class BrowserService {
                 //     polling: 1000  // Check every second
                 // });
 
-                await this.handleCookieConsent();
+                // Handle common scenarios
+                await this.handleCloudflare().catch(() => {});
+                await this.handleCookieConsent().catch(() => {});
+                
+                // Wait for critical elements with a reasonable timeout
+                try {
+                    await this.page.waitForFunction(() => {
+                        // Check document readyState
+                        if (document.readyState !== 'complete') return false;
+                        
+                        // Basic content check
+                        const mainContent = document.body.textContent?.length > 0;
+                        if (!mainContent) return false;
+                        
+                        // Check for any loading indicators
+                        const loadingElements = document.querySelectorAll(
+                            '.air3-loader, .air3-spinner, [data-test="loading"], .loading'
+                        );
+                        return loadingElements.length === 0;
+                    }, { 
+                        timeout: 20000,
+                        polling: 1000
+                    });
+                } catch (contentError) {
+                    logger.warn('Content loading timeout - will attempt to continue');
+                }
+
                 await browserUtils.randomDelay(2000, 3000);
+                
+                // Validate the page content
+                if (url.includes('/jobs/') || url.includes('/search/')) {
+                    const isValid = await this.validateJobsPage();
+                    if (!isValid) {
+                        logger.warn('Page validation failed - will retry navigation');
+                        throw new Error('Invalid page state after navigation');
+                    }
+                }
+                
                 return true;
             } catch (error) {
                 retries++;
@@ -426,6 +489,34 @@ export class BrowserService {
             }
         }
         return false;
+    }
+
+    async validateJobsPage() {
+        try {
+            const pageValidation = await this.page.evaluate(() => {
+                // Check for common job page indicators
+                const hasJobTiles = document.querySelectorAll('[data-test="job-tile"]').length > 0;
+                const hasJobLinks = document.querySelectorAll('a[href*="/jobs/"]').length > 0;
+                const hasSearchResults = document.querySelectorAll('[data-test="job-search-results"], .job-search-results').length > 0;
+                
+                return {
+                    hasJobTiles,
+                    hasJobLinks,
+                    hasSearchResults,
+                    url: window.location.href
+                };
+            });
+
+            if (!pageValidation.hasJobTiles && !pageValidation.hasJobLinks && !pageValidation.hasSearchResults) {
+                logger.warn('Page validation failed - no job elements found');
+                logger.debug('Current URL:', pageValidation.url);
+                return false;
+            }
+            return true;
+        } catch (error) {
+            logger.error('Error validating jobs page:', error);
+            return false;
+        }
     }
 
     async cleanup() {

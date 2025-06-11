@@ -1,35 +1,6 @@
-# Dependencies
+#ignore node_modules
 node_modules/
-
-# Environment variables
+#ignore .env
 .env
-.env.*
-
-# User data and logs
+#ignore /user_data
 user_data/
-logs/
-*.log
-
-# Chrome user data
-Default/
-Cache/
-GPUCache/
-CacheStorage/
-Code Cache/
-Service Worker/
-
-# Runtime data
-*.pid
-*.seed
-*.pid.lock
-
-# IDE
-.vscode/
-.idea/
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Production config
-ecosystem.config.js
