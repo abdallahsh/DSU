@@ -6,14 +6,10 @@
   "scripts": {
     "start": "node app.js",
     "start:prod": "cross-env NODE_ENV=production node app.js",
-    "start:even": "cross-env NODE_ENV=production INSTANCE_TYPE=even node app.js",
-    "start:odd": "cross-env NODE_ENV=production INSTANCE_TYPE=odd node app.js",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:stop": "pm2 stop ecosystem.config.js",
     "pm2:restart": "pm2 restart ecosystem.config.js",
-    "pm2:logs": "pm2 logs",
-    "pm2:logs:even": "pm2 logs upwork-scraper-even",
-    "pm2:logs:odd": "pm2 logs upwork-scraper-odd",
+    "pm2:logs": "pm2 logs upwork-scraper",
     "pm2:monitor": "pm2 monit",
     "preinstall": "node -e \"if(process.env.NODE_ENV === 'production'){ process.exit(0) }\" || npm install --only=dev"
   },

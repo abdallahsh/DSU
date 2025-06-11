@@ -10,7 +10,6 @@ export class MainScraper extends BrowserService {
         super();
         this.processedJobs = new Set();
         this.currentBatch = [];
-        this.isStopping = false;
     }
 
     async checkLoginStatus() {
@@ -276,7 +275,6 @@ export class MainScraper extends BrowserService {
 
     async start() {
         try {
-            this.isStopping = false;
             await this.initialize();
 
             // Start from main page
@@ -289,7 +287,7 @@ export class MainScraper extends BrowserService {
                 }
             }
 
-            while (!this.isStopping) {
+            while (true) {
                 try {
                     // Navigate to jobs page
                     await this.navigateToUrl(config.browser.jobsUrl);
@@ -307,7 +305,7 @@ export class MainScraper extends BrowserService {
                     }
 
                     // Process jobs
-                    for (let i = 0; i < jobLinks.length && !this.isStopping; i++) {
+                    for (let i = 0; i < jobLinks.length; i++) {
                         await this.processJob(jobLinks[i], i, jobLinks.length);
 
                         if (this.currentBatch.length >= config.redis.jobBatchSize) {
@@ -320,52 +318,20 @@ export class MainScraper extends BrowserService {
                         );
                     }
 
-                    if (!this.isStopping) {
-                        await this.saveCurrentBatch();
-                        await browserUtils.randomDelay(2000, 3000);
-                    }
+                    await this.saveCurrentBatch();
+                    await browserUtils.randomDelay(2000, 3000);
 
                 } catch (error) {
-                    if (!this.isStopping) {
-                        logger.error('Error during scraping cycle:', error);
-                        this.currentBatch = [];
-                        await browserUtils.randomDelay(
-                            config.scraper.pageRefreshDelay.min,
-                            config.scraper.pageRefreshDelay.max
-                        );
-                    }
+                    logger.error('Error during scraping cycle:', error);
+                    this.currentBatch = [];
+                    await browserUtils.randomDelay(
+                        config.scraper.pageRefreshDelay.min,
+                        config.scraper.pageRefreshDelay.max
+                    );
                 }
             }
-            
-            logger.info('Scraping stopped gracefully');
         } catch (error) {
             logger.error('Fatal error during scraping:', error);
-            throw error;
-        }
-    }
-
-    async cleanup() {
-        try {
-            logger.info('Cleaning up MainScraper resources...');
-            
-            // Save any remaining jobs in the batch
-            if (this.currentBatch && this.currentBatch.length > 0) {
-                await this.saveCurrentBatch();
-            }
-
-            // Close browser if it's open
-            if (this.browser) {
-                await this.browser.close();
-                this.browser = null;
-            }
-
-            // Reset state
-            this.currentBatch = [];
-            this.isRunning = false;
-
-            logger.info('MainScraper cleanup completed');
-        } catch (error) {
-            logger.error('Error during MainScraper cleanup:', error);
             throw error;
         }
     }

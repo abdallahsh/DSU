@@ -1,5 +1,4 @@
 import MainScraper from "./services/mainScraper.service.js";
-import SchedulerService from "./services/scheduler.service.js";
 import { logger } from "./utils/common.js";
 import { cache } from "./utils/redis.cash.js";
 import http from 'http';
@@ -7,7 +6,6 @@ import http from 'http';
 class Application {
     constructor() {
         this.mainScraper = null;
-        this.scheduler = null;
         this.isRunning = false;
         this.setupShutdownHandlers();
     }
@@ -33,17 +31,13 @@ class Application {
         try {
             logger.info('Initializing application...');
             
-            // Initialize Redis connection
-            await cache.connect();
-            logger.info('Redis connection established');
+            // // Initialize Redis connection
+            // await cache.connect();
+            // logger.info('Redis connection established');
 
             // Initialize Main Scraper
             this.mainScraper = new MainScraper();
             logger.info('Main Scraper initialized');
-
-            // Initialize Scheduler
-            this.scheduler = new SchedulerService(this);
-            logger.info('Scheduler initialized');
 
             this.isRunning = true;
             logger.info('Application initialized successfully');
@@ -61,22 +55,10 @@ class Application {
 
         try {
             logger.info('Starting application...');
-            await this.scheduler.start();
+            await this.mainScraper.start();
         } catch (error) {
             logger.error('Error during application execution:', error);
             await this.shutdown('error');
-        }
-    }
-
-    async startScraping() {
-        if (this.mainScraper) {
-            await this.mainScraper.start();
-        }
-    }
-
-    async stopScraping() {
-        if (this.mainScraper) {
-            await this.mainScraper.cleanup();
         }
     }
 
@@ -87,11 +69,6 @@ class Application {
         this.isRunning = false;
 
         try {
-            // Stop the scheduler
-            if (this.scheduler) {
-                this.scheduler.stop();
-            }
-
             // Cleanup resources
             if (this.mainScraper) {
                 await this.mainScraper.cleanup();
@@ -115,8 +92,6 @@ const healthServer = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'OK',
-      instanceType: process.env.INSTANCE_TYPE || 'unknown',
-      isActive: app?.scheduler?.isActive || false,
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       memory: process.memoryUsage()
