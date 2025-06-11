@@ -1,0 +1,4 @@
+2025/06/10-18:36:20.079 3b9c Reusing MANIFEST E:\2025\DSU\user_data\Default\IndexedDB\https_www.upwork.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/06/10-18:36:20.080 3b9c Recovering log #1812
+2025/06/10-18:36:20.080 3b9c Reusing old log E:\2025\DSU\user_data\Default\IndexedDB\https_www.upwork.com_0.indexeddb.leveldb/001812.log 
+2025/06/10-18:36:21.521 2270 Manual compaction at level-0 from ' ~\x02\x00\x00\x00' @ 72057594037927935 : 1 .. ' \x7f\x02\x00\x00\x00' @ 0 : 0; will stop at (end)
