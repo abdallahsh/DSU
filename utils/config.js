@@ -40,7 +40,8 @@ export const config = {
       timeout: 120000
     },
     userDataDir: './user_data',
-    headless: process.env.HEADLESS === 'false',
+    // Make headless default to true unless explicitly set to 'false'
+    headless: process.env.HEADLESS !== 'false',
   },
   scraper: {
     maxRetries: 3,

@@ -26,7 +26,7 @@ export class BrowserService {
         try {
             const { page, browser } = await connect({
                 args: config.browser.args,
-                headless: false,
+                headless: true,
                 turnstile: true,
                 customConfig: {
                     ignoreDefaultArgs: ['--enable-automation'],
@@ -165,47 +165,8 @@ export class BrowserService {
         }
     }
 
-    async handleCookieConsent() {
-        try {
-            const selectors = [
-                'button[data-cy="cookie-banner-accept"]',
-                'button[data-cy="cookie-banner-accept-all"]',
-                'button.accept-cookies'
-            ];
 
-            for (const selector of selectors) {
-                const button = await this.page.$(selector);
-                if (button) {
-                    await browserUtils.moveMouseLikeHuman(this.page, button);
-                    await button.click();
-                    return true;
-                }
-            }
-            return false;
-        } catch (error) {
-            logger.debug('No cookie consent found or already accepted');
-            return false;
-        }
-    }
 
-    async handleCloudflare(selector = '#challenge-form', timeout = 30000) {
-        try {
-            await this.page.waitForSelector(selector, { timeout: 5000 });
-            logger.info('Cloudflare challenge detected, waiting...');
-            
-            await this.page.waitForFunction(
-                (sel) => !document.querySelector(sel),
-                { timeout },
-                selector
-            );
-            
-            await browserUtils.randomDelay(2000, 4000);
-            return true;
-        } catch (error) {
-            logger.debug('No Cloudflare challenge found');
-            return false;
-        }
-    }
 
     async navigateToUrl(url, options = {}) {
         let retries = 0;
@@ -233,42 +194,6 @@ export class BrowserService {
                     logger.debug('Network timeout occurred, but page might be usable');
                 }
                 
-                // Wait for page to be fully loaded
-                // await this.page.waitForFunction(() => {
-                //     // Check document readyState
-                //     if (document.readyState !== 'complete') return false;
-                    
-
-                    
-                //     // Check for any loading indicators
-                //     const loadingElements = document.querySelectorAll(
-                //         '.air3-loader, .air3-spinner, [data-test="loading"], .loading'
-                //     );
-                //     if (loadingElements.length > 0) return false;
-                    
-                //     // Check if there are any pending XHR requests
-                //     const xhrInProgress = window.performance
-                //         .getEntriesByType('resource')
-                //         .some(r => r.initiatorType === 'xmlhttprequest' && !r.responseEnd);
-                //     if (xhrInProgress) return false;
-                    
-                //     // Check if all images and iframes are loaded
-                //     const mediaElements = [...document.images, ...document.getElementsByTagName('iframe')];
-                //     const allMediaLoaded = mediaElements.every((e) => {
-                //         if (e.tagName === 'IMG') return e.complete;
-                //         if (e.tagName === 'IFRAME') return e.contentWindow;
-                //         return true;
-                //     });
-                    
-                //     return allMediaLoaded;
-                // }, { 
-                //     timeout: 30000,
-                //     polling: 1000  // Check every second
-                // });
-
-                // Handle common scenarios
-                await this.handleCloudflare().catch(() => {});
-                await this.handleCookieConsent().catch(() => {});
                 
                 // Wait for critical elements with a reasonable timeout
                 try {
@@ -407,18 +332,6 @@ export class BrowserService {
 
     
 
-    
-
-    async simulateHumanBehavior() {
-        try {
-            await browserUtils.simulateScrolling(this.page);
-            await browserUtils.randomDelay();
-            return true;
-        } catch (error) {
-            logger.error('Human behavior simulation failed', error);
-            return false;
-        }
-    }
 
     async login(page) {
         let retries = 0;
