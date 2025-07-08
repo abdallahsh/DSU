@@ -85,28 +85,6 @@ class Application {
     }
 }
 
-// Create health check server
-const healthServer = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'OK',
-      instanceType: process.env.INSTANCE_TYPE || 'unknown',
-      isActive: app?.scheduler?.isActive || false,
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      memory: process.memoryUsage()
-    }));
-  } else {
-    res.writeHead(404);
-    res.end();
-  }
-});
-
-// Start health check server on port 3000
-healthServer.listen(3000, () => {
-  logger.info('Health check server running on port 3000');
-});
 
 async function main() {
     const app = new Application();

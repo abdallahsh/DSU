@@ -32,6 +32,8 @@ export const config = {
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-popup-blocking",
+      "--no-sandbox", 
+      "--disable-setuid-sandbox"
     ],
     defaultTimeout: 60000,
     navigationTimeout: 90000,

@@ -1,6 +1,6 @@
 import { connect } from 'puppeteer-real-browser';
 import { config } from '../utils/config.js';
-import { logger, delay, browserUtils } from '../utils/common.js';
+import { logger, delay, browserUtils, isEC2 } from '../utils/common.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -11,6 +11,8 @@ export class BrowserService {
         this.isLoggedIn = false;
         this.isScraping = false;
         this.userDataDir = this.ensureUserDataDir();
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 3;
     }
 
     ensureUserDataDir() {
@@ -18,31 +20,111 @@ export class BrowserService {
         if (!fs.existsSync(userDataDir)) {
             fs.mkdirSync(userDataDir, { recursive: true });
         }
+        // Clear user data if running on EC2 to prevent stale sessions
+        if (isEC2() && fs.existsSync(userDataDir)) {
+            try {
+                fs.rmSync(userDataDir, { recursive: true, force: true });
+                fs.mkdirSync(userDataDir, { recursive: true });
+                logger.info('Cleared browser user data directory for fresh session');
+            } catch (error) {
+                logger.warn('Failed to clear browser user data:', error);
+            }
+        }
         return userDataDir;
     }
-    //
 
     async initialize() {
         try {
-            const { page, browser } = await connect({
-                args: config.browser.args,
-                headless: true,
+            const browserConfig = {
+                args: [
+                    ...config.browser.args,
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                ],
+                headless:true,
                 turnstile: true,
                 customConfig: {
                     ignoreDefaultArgs: ['--enable-automation'],
                     userDataDir: this.userDataDir
                 },
-                connectOption: config.browser.connectOptions
-            });
+                connectOption: {
+                    ...config.browser.connectOptions,
+                    timeout: 120000, // Increased timeout for EC2
+                }
+            };
+
+            const { page, browser } = await connect(browserConfig);
 
             this.browser = browser;
             this.page = page;
 
             await this.setupPage(page);
             logger.info('Browser initialized successfully');
+
+            // Set up error handlers
+            this.setupErrorHandlers(page, browser);
+
             return true;
         } catch (error) {
             logger.error('Browser initialization failed', error);
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                this.reconnectAttempts++;
+                logger.info(`Retrying browser initialization (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+                await delay(5000);
+                return this.initialize();
+            }
+            throw error;
+        }
+    }
+
+    setupErrorHandlers(page, browser) {
+        page.on('error', error => {
+            logger.error('Page crashed:', error);
+            this.handlePageError(error).catch(e => logger.error('Error recovery failed:', e));
+        });
+
+        page.on('requestfailed', request => {
+            const failure = request.failure();
+            if (failure && failure.errorText !== 'net::ERR_ABORTED') {
+                logger.warn(`Request failed: ${request.url()} - ${failure.errorText}`);
+            }
+        });
+
+        browser.on('disconnected', () => {
+            logger.error('Browser disconnected');
+            this.handleBrowserDisconnect().catch(e => logger.error('Reconnection failed:', e));
+        });
+    }
+
+    async handlePageError(error) {
+        if (!this.page || !this.browser) return;
+
+        try {
+            const isResponsive = await this.page.evaluate(() => true).catch(() => false);
+            if (!isResponsive) {
+                logger.info('Page unresponsive, creating new page...');
+                await this.page.close().catch(() => {});
+                this.page = await this.browser.newPage();
+                await this.setupPage(this.page);
+            }
+        } catch (recoveryError) {
+            logger.error('Page recovery failed:', recoveryError);
+            throw recoveryError;
+        }
+    }
+
+    async handleBrowserDisconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            throw new Error('Max reconnection attempts reached');
+        }
+
+        try {
+            this.reconnectAttempts++;
+            logger.info(`Attempting to reconnect browser (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+            await this.initialize();
+        } catch (error) {
+            logger.error('Browser reconnection failed:', error);
             throw error;
         }
     }
@@ -172,45 +254,35 @@ export class BrowserService {
         let retries = 0;
         while (retries < config.scraper.maxRetries) {
             try {
-                // First attempt with just domcontentloaded for faster initial load
+                // Always use 'domcontentloaded' for navigation for speed and Cloudflare compatibility
                 const navigationOptions = {
                     waitUntil: 'domcontentloaded',
                     timeout: 30000,
                     ...options
                 };
 
-                // Navigate to page
                 await this.page.goto(url, navigationOptions);
-                
-                // Wait for network to settle with a separate timeout
-                try {
-                    await this.page.waitForNavigation({ 
-                        waitUntil: 'networkidle0',
-                        timeout: 30000
-                    }).catch(() => {
-                        logger.debug('Network did not reach idle state - continuing anyway');
-                    });
-                } catch (networkError) {
-                    logger.debug('Network timeout occurred, but page might be usable');
+
+                // If jobs/search page, wait extra for Cloudflare verification
+                if (url.includes('/jobs/') || url.includes('/search/')) {
+                    logger.info('Waiting for Cloudflare verification to complete...');
+                    await browserUtils.randomDelay(
+                        config.scraper.cloudflareDelay?.min || 3000,
+                        config.scraper.cloudflareDelay?.max || 7000
+                    );
                 }
-                
-                
+
                 // Wait for critical elements with a reasonable timeout
                 try {
                     await this.page.waitForFunction(() => {
-                        // Check document readyState
                         if (document.readyState !== 'complete') return false;
-                        
-                        // Basic content check
                         const mainContent = document.body.textContent?.length > 0;
                         if (!mainContent) return false;
-                        
-                        // Check for any loading indicators
                         const loadingElements = document.querySelectorAll(
                             '.air3-loader, .air3-spinner, [data-test="loading"], .loading'
                         );
                         return loadingElements.length === 0;
-                    }, { 
+                    }, {
                         timeout: 20000,
                         polling: 1000
                     });
@@ -218,9 +290,9 @@ export class BrowserService {
                     logger.warn('Content loading timeout - will attempt to continue');
                 }
 
-                await browserUtils.randomDelay(2000, 3000);
-                
-                // Validate the page content
+                await browserUtils.randomDelay(1000, 3000);
+
+                // Validate the page content for jobs/search
                 if (url.includes('/jobs/') || url.includes('/search/')) {
                     const isValid = await this.validateJobsPage();
                     if (!isValid) {
@@ -228,38 +300,31 @@ export class BrowserService {
                         throw new Error('Invalid page state after navigation');
                     }
                 }
-                
+
                 return true;
             } catch (error) {
                 retries++;
                 logger.error(`Navigation failed (attempt ${retries}/${config.scraper.maxRetries})`, error);
-                
                 if (retries < config.scraper.maxRetries) {
                     // Try to recover from various error states
                     try {
-                        // Check if page is still responsive
                         const isResponsive = await this.page.evaluate(() => true).catch(() => false);
-                        
                         if (!isResponsive) {
                             logger.warn('Page is unresponsive, recreating page...');
                             await this.page.close().catch(() => {});
                             this.page = await this.browser.newPage();
                             await this.setupPage(this.page);
                         } else {
-                            // Try a simple reload first
                             await this.page.reload({ 
-                                waitUntil: ['domcontentloaded', 'networkidle0'],
+                                waitUntil: 'domcontentloaded',
                                 timeout: 30000 
                             });
                         }
                     } catch (recoveryError) {
                         logger.error('Recovery attempt failed:', recoveryError);
-                        // If recovery fails, we'll still retry the navigation
                     }
-                    
-                    
                     logger.info(`Waiting before retry...`);
-                    await browserUtils.randomDelay(2000, 5000);
+                    await browserUtils.randomDelay(1000, 5000);
                     continue;
                 }
                 throw error;
@@ -337,45 +402,90 @@ export class BrowserService {
         let retries = 0;
         while (retries < config.scraper.maxRetries) {
             try {
-                await page.goto(config.browser.loginUrl, { 
-                    waitUntil: 'networkidle0', 
-                    timeout: 60000 
+                // Clear cookies before login attempt
+                await page.cookies().then(cookies => 
+                    Promise.all(cookies.map(cookie => 
+                        page.deleteCookie(cookie)))
+                ).catch(e => logger.warn('Failed to clear cookies:', e));
+
+                await this.navigateToUrl(config.browser.loginUrl, {
+                    waitUntil: 'networkidle0',
+                    timeout: isEC2() ? 120000 : config.browser.defaultTimeout
                 });
 
-                // Handle email input
+                // Wait for and enter email
                 logger.info('Entering email...');
-                await page.waitForSelector(config.selectors.login.emailInput, { visible: true });
+                const emailInput = await page.waitForSelector(config.selectors.login.emailInput, { 
+                    visible: true,
+                    timeout: 30000
+                });
+                if (!emailInput) throw new Error('Email input not found');
+                await emailInput.click({ clickCount: 3 });
+                await emailInput.press('Backspace');
                 await page.type(config.selectors.login.emailInput, config.browser.email, { delay: 10 });
-                await browserUtils.randomDelay(2000, 4000);
+                await browserUtils.randomDelay(1000, 2000);
 
                 // Click continue after email
                 logger.info('Clicking continue after email...');
                 await page.click(config.selectors.login.continueButton);
-                
-                // Wait for password field
+
+                // Wait for password field, with extra checks and debug
                 logger.info('Waiting for password field...');
-                await page.waitForSelector(config.selectors.login.passwordInput, { 
-                    visible: true,
-                    timeout: 30000 
-                });
-                
-                // Type password
-                logger.info('Entering password...');
+                let passwordInput = null;
+                try {
+                    passwordInput = await page.waitForSelector(config.selectors.login.passwordInput, { 
+                        visible: true,
+                        timeout: 30000 
+                    });
+                } catch (pwErr) {
+                    logger.error('Password field not found after email submit:', pwErr);
+                    // Check for error messages on the page
+                    const errorMsg = await page.evaluate(() => {
+                        const err = document.querySelector('.error, .alert, .up-error, [role="alert"]');
+                        return err ? err.textContent : null;
+                    });
+                    if (errorMsg) {
+                        logger.warn('Login page error message:', errorMsg);
+                    }
+                    // Screenshot for debugging
+                    try {
+                        await page.screenshot({ path: `login_error_${Date.now()}.png` });
+                        logger.info('Saved screenshot of login error');
+                    } catch (ssErr) {
+                        logger.warn('Failed to save screenshot:', ssErr);
+                    }
+                    // Log a snippet of the page content for debugging
+                    const pageContent = await page.content();
+                    logger.debug('Login page HTML snippet:', pageContent.slice(0, 500));
+                    throw pwErr;
+                }
+                if (!passwordInput) throw new Error('Password input not found');
+                await passwordInput.click({ clickCount: 3 });
+                await passwordInput.press('Backspace');
                 await page.type(config.selectors.login.passwordInput, config.browser.password, { delay: 10 });
-                await browserUtils.randomDelay(2000, 4000);
+                await browserUtils.randomDelay(1000, 2000);
 
                 // Click login
                 logger.info('Completing login...');
                 await page.click(config.selectors.login.submitButton);
-                
-                // Wait for navigation
-                logger.info('Waiting for login completion...');
-                await page.waitForNavigation({ 
-                    waitUntil: 'networkidle0',
-                    timeout: 60000
-                }).catch(() => logger.warn('Navigation timeout - continuing anyway'));
 
-                await browserUtils.randomDelay(2000, 4000);
+                // Wait for navigation or error
+                logger.info('Waiting for login completion...');
+                await Promise.race([
+                    page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 }),
+                    page.waitForSelector('.error, .alert, .up-error, [role="alert"]', { timeout: 60000 }).catch(() => null)
+                ]);
+                await browserUtils.randomDelay(1000, 2000);
+
+                // Check for login error message after submit
+                const loginError = await page.evaluate(() => {
+                    const err = document.querySelector('.error, .alert, .up-error, [role="alert"]');
+                    return err ? err.textContent : null;
+                });
+                if (loginError) {
+                    logger.warn('Login failed, error message:', loginError);
+                    throw new Error('Login error: ' + loginError);
+                }
 
                 // Verify login success
                 logger.info('Verifying login...');
@@ -393,11 +503,19 @@ export class BrowserService {
             } catch (error) {
                 retries++;
                 logger.error(`Login failed (attempt ${retries}/${config.scraper.maxRetries})`, error);
-                
                 if (retries < config.scraper.maxRetries) {
                     await browserUtils.randomDelay(config.scraper.retryDelay, config.scraper.retryDelay * 2);
                     continue;
                 }
+                // Final debug: screenshot and page content
+                try {
+                    await page.screenshot({ path: `login_final_error_${Date.now()}.png` });
+                    logger.info('Saved final screenshot of login error');
+                } catch (ssErr) {
+                    logger.warn('Failed to save final screenshot:', ssErr);
+                }
+                const pageContent = await page.content();
+                logger.debug('Final login page HTML snippet:', pageContent.slice(0, 1000));
                 return false;
             }
         }

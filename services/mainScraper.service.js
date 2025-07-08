@@ -279,7 +279,7 @@ export class MainScraper extends BrowserService {
 
             // Start from main page
             await this.navigateToUrl(config.browser.baseUrl);
-            await browserUtils.randomDelay(2000, 3000);
+            await browserUtils.randomDelay(500, 3000);
 
             if (!await this.checkLoginStatus()) {
                 if (!await this.loginWithRetry()) {
