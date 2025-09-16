@@ -203,6 +203,20 @@ export class MainScraper extends BrowserService {
                 modalError = error;
                 logger.warn(`Modal scraping failed for job ${jobInfo.jobId}: ${error.message}`);
 
+                // if the error is access denied ,its because the login session expired so Re login
+                if (error.message.includes('Access denied')) {
+                        logger.info('Session expired, attempting to re-login...');
+                        const loginSuccess = await this.loginWithRetry();
+                        if (!loginSuccess) {
+                            throw new Error('Re-login failed after session expiration');
+                        }
+                        logger.info('Re-login successful, continuing with job processing...');
+                        await browserUtils.randomDelay(2000, 4000);
+
+                        // start over the job processing after re-login
+                        return this.processJob(jobInfo, index, totalJobs);
+                }
+
                 if (error.message.includes('Access denied') || 
                     error.message.includes('Job deleted') ||
                     error.message.includes('Content blocked')) {
@@ -288,8 +302,11 @@ export class MainScraper extends BrowserService {
             }
 
             while (true) {
+                //check the login status before every cycle
+                await this.reloginIfNeeded();
                 try {
                     // Navigate to jobs page
+                    await browserUtils.randomDelay(3000, 5000);
                     await this.navigateToUrl(config.browser.jobsUrl);
                     await browserUtils.randomDelay(3000, 5000);
 

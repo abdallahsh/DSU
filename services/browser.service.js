@@ -5,6 +5,24 @@ import path from 'path';
 import fs from 'fs';
 
 export class BrowserService {
+    async closeCookieBanner(page) {
+        const closeBtnSelector = 'button.onetrust-close-btn-handler.banner-close-button.ot-close-icon';
+        try {
+            const closeBtn = await page.$(closeBtnSelector);
+            if (closeBtn) {
+                await closeBtn.click();
+                await browserUtils.randomDelay(500, 1000);
+                logger.info('Cookie banner closed.');
+                return true;
+            } else {
+                logger.info('No cookie banner found.');
+                return false;
+            }
+        } catch (error) {
+            logger.warn('Error closing cookie banner:', error);
+            return false;
+        }
+    }
     constructor() {
         this.browser = null;
         this.page = null;
@@ -19,16 +37,6 @@ export class BrowserService {
         const userDataDir = path.join(process.cwd(), config.browser.userDataDir);
         if (!fs.existsSync(userDataDir)) {
             fs.mkdirSync(userDataDir, { recursive: true });
-        }
-        // Clear user data if running on EC2 to prevent stale sessions
-        if (isEC2() && fs.existsSync(userDataDir)) {
-            try {
-                fs.rmSync(userDataDir, { recursive: true, force: true });
-                fs.mkdirSync(userDataDir, { recursive: true });
-                logger.info('Cleared browser user data directory for fresh session');
-            } catch (error) {
-                logger.warn('Failed to clear browser user data:', error);
-            }
         }
         return userDataDir;
     }
@@ -63,7 +71,7 @@ export class BrowserService {
             logger.info('Browser initialized successfully');
 
             // Set up error handlers
-            this.setupErrorHandlers(page, browser);
+            // this.setupErrorHandlers(page, browser);
 
             return true;
         } catch (error) {
@@ -78,24 +86,24 @@ export class BrowserService {
         }
     }
 
-    setupErrorHandlers(page, browser) {
-        page.on('error', error => {
-            logger.error('Page crashed:', error);
-            this.handlePageError(error).catch(e => logger.error('Error recovery failed:', e));
-        });
+    // setupErrorHandlers(page, browser) {
+    //     page.on('error', error => {
+    //         logger.error('Page crashed:', error);
+    //         this.handlePageError(error).catch(e => logger.error('Error recovery failed:', e));
+    //     });
 
-        page.on('requestfailed', request => {
-            const failure = request.failure();
-            if (failure && failure.errorText !== 'net::ERR_ABORTED') {
-                logger.warn(`Request failed: ${request.url()} - ${failure.errorText}`);
-            }
-        });
+    //     page.on('requestfailed', request => {
+    //         const failure = request.failure();
+    //         if (failure && failure.errorText !== 'net::ERR_ABORTED') {
+    //             logger.warn(`Request failed: ${request.url()} - ${failure.errorText}`);
+    //         }
+    //     });
 
-        browser.on('disconnected', () => {
-            logger.error('Browser disconnected');
-            this.handleBrowserDisconnect().catch(e => logger.error('Reconnection failed:', e));
-        });
-    }
+    //     browser.on('disconnected', () => {
+    //         logger.error('Browser disconnected');
+    //         this.handleBrowserDisconnect().catch(e => logger.error('Reconnection failed:', e));
+    //     });
+    // }
 
     async handlePageError(error) {
         if (!this.page || !this.browser) return;
@@ -254,35 +262,44 @@ export class BrowserService {
         let retries = 0;
         while (retries < config.scraper.maxRetries) {
             try {
-                // Always use 'domcontentloaded' for navigation for speed and Cloudflare compatibility
+                // First attempt with just domcontentloaded for faster initial load
                 const navigationOptions = {
                     waitUntil: 'domcontentloaded',
                     timeout: 30000,
                     ...options
                 };
 
+                // Navigate to page
                 await this.page.goto(url, navigationOptions);
-
-                // If jobs/search page, wait extra for Cloudflare verification
-                if (url.includes('/jobs/') || url.includes('/search/')) {
-                    logger.info('Waiting for Cloudflare verification to complete...');
-                    await browserUtils.randomDelay(
-                        config.scraper.cloudflareDelay?.min || 3000,
-                        config.scraper.cloudflareDelay?.max || 7000
-                    );
+                
+                // Wait for network to settle with a separate timeout
+                try {
+                    await this.page.waitForNavigation({ 
+                        timeout: 30000
+                    }).catch(() => {
+                        logger.debug('Network did not reach idle state - continuing anyway');
+                    });
+                } catch (networkError) {
+                    logger.debug('Network timeout occurred, but page might be usable');
                 }
-
+                
+                
                 // Wait for critical elements with a reasonable timeout
                 try {
                     await this.page.waitForFunction(() => {
+                        // Check document readyState
                         if (document.readyState !== 'complete') return false;
+                        
+                        // Basic content check
                         const mainContent = document.body.textContent?.length > 0;
                         if (!mainContent) return false;
+                        
+                        // Check for any loading indicators
                         const loadingElements = document.querySelectorAll(
                             '.air3-loader, .air3-spinner, [data-test="loading"], .loading'
                         );
                         return loadingElements.length === 0;
-                    }, {
+                    }, { 
                         timeout: 20000,
                         polling: 1000
                     });
@@ -291,8 +308,8 @@ export class BrowserService {
                 }
 
                 await browserUtils.randomDelay(1000, 3000);
-
-                // Validate the page content for jobs/search
+                
+                // Validate the page content
                 if (url.includes('/jobs/') || url.includes('/search/')) {
                     const isValid = await this.validateJobsPage();
                     if (!isValid) {
@@ -300,29 +317,36 @@ export class BrowserService {
                         throw new Error('Invalid page state after navigation');
                     }
                 }
-
+                
                 return true;
             } catch (error) {
                 retries++;
                 logger.error(`Navigation failed (attempt ${retries}/${config.scraper.maxRetries})`, error);
+                
                 if (retries < config.scraper.maxRetries) {
                     // Try to recover from various error states
                     try {
+                        // Check if page is still responsive
                         const isResponsive = await this.page.evaluate(() => true).catch(() => false);
+                        
                         if (!isResponsive) {
                             logger.warn('Page is unresponsive, recreating page...');
                             await this.page.close().catch(() => {});
                             this.page = await this.browser.newPage();
                             await this.setupPage(this.page);
                         } else {
+                            // Try a simple reload first
                             await this.page.reload({ 
-                                waitUntil: 'domcontentloaded',
+                                waitUntil: ['domcontentloaded', 'networkidle0'],
                                 timeout: 30000 
                             });
                         }
                     } catch (recoveryError) {
                         logger.error('Recovery attempt failed:', recoveryError);
+                        // If recovery fails, we'll still retry the navigation
                     }
+                    
+                    
                     logger.info(`Waiting before retry...`);
                     await browserUtils.randomDelay(1000, 5000);
                     continue;
@@ -408,21 +432,23 @@ export class BrowserService {
                         page.deleteCookie(cookie)))
                 ).catch(e => logger.warn('Failed to clear cookies:', e));
 
-                await this.navigateToUrl(config.browser.loginUrl, {
-                    waitUntil: 'networkidle0',
-                    timeout: isEC2() ? 120000 : config.browser.defaultTimeout
-                });
+                await this.navigateToUrl(config.browser.loginUrl);
+                await browserUtils.randomDelay(3000, 5000);
+                // Close cookie banner if present
+                await this.closeCookieBanner(page).catch(() => {});
+
 
                 // Wait for and enter email
                 logger.info('Entering email...');
                 const emailInput = await page.waitForSelector(config.selectors.login.emailInput, { 
-                    visible: true,
                     timeout: 30000
                 });
                 if (!emailInput) throw new Error('Email input not found');
-                await emailInput.click({ clickCount: 3 });
-                await emailInput.press('Backspace');
-                await page.type(config.selectors.login.emailInput, config.browser.email, { delay: 10 });
+                // await emailInput.click({ clickCount: 3 });
+                // await emailInput.press('Backspace');
+                await page.focus(config.selectors.login.emailInput);
+
+                await page.type(config.selectors.login.emailInput, config.browser.email);
                 await browserUtils.randomDelay(1000, 2000);
 
                 // Click continue after email
@@ -431,38 +457,11 @@ export class BrowserService {
 
                 // Wait for password field, with extra checks and debug
                 logger.info('Waiting for password field...');
-                let passwordInput = null;
-                try {
-                    passwordInput = await page.waitForSelector(config.selectors.login.passwordInput, { 
-                        visible: true,
-                        timeout: 30000 
-                    });
-                } catch (pwErr) {
-                    logger.error('Password field not found after email submit:', pwErr);
-                    // Check for error messages on the page
-                    const errorMsg = await page.evaluate(() => {
-                        const err = document.querySelector('.error, .alert, .up-error, [role="alert"]');
-                        return err ? err.textContent : null;
-                    });
-                    if (errorMsg) {
-                        logger.warn('Login page error message:', errorMsg);
-                    }
-                    // Screenshot for debugging
-                    try {
-                        await page.screenshot({ path: `login_error_${Date.now()}.png` });
-                        logger.info('Saved screenshot of login error');
-                    } catch (ssErr) {
-                        logger.warn('Failed to save screenshot:', ssErr);
-                    }
-                    // Log a snippet of the page content for debugging
-                    const pageContent = await page.content();
-                    logger.debug('Login page HTML snippet:', pageContent.slice(0, 500));
-                    throw pwErr;
-                }
-                if (!passwordInput) throw new Error('Password input not found');
-                await passwordInput.click({ clickCount: 3 });
-                await passwordInput.press('Backspace');
-                await page.type(config.selectors.login.passwordInput, config.browser.password, { delay: 10 });
+
+
+                await browserUtils.randomDelay(5000, 6000);
+
+                await page.type(config.selectors.login.passwordInput, config.browser.password);
                 await browserUtils.randomDelay(1000, 2000);
 
                 // Click login
@@ -471,10 +470,7 @@ export class BrowserService {
 
                 // Wait for navigation or error
                 logger.info('Waiting for login completion...');
-                await Promise.race([
-                    page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 }),
-                    page.waitForSelector('.error, .alert, .up-error, [role="alert"]', { timeout: 60000 }).catch(() => null)
-                ]);
+
                 await browserUtils.randomDelay(1000, 2000);
 
                 // Check for login error message after submit
@@ -505,6 +501,8 @@ export class BrowserService {
                 logger.error(`Login failed (attempt ${retries}/${config.scraper.maxRetries})`, error);
                 if (retries < config.scraper.maxRetries) {
                     await browserUtils.randomDelay(config.scraper.retryDelay, config.scraper.retryDelay * 2);
+                    await page.screenshot({ path: `login_final_error_${Date.now()}.png` });
+
                     continue;
                 }
                 // Final debug: screenshot and page content
@@ -514,12 +512,36 @@ export class BrowserService {
                 } catch (ssErr) {
                     logger.warn('Failed to save final screenshot:', ssErr);
                 }
-                const pageContent = await page.content();
-                logger.debug('Final login page HTML snippet:', pageContent.slice(0, 1000));
+
                 return false;
             }
         }
         return false;
+    }
+
+    // Relogin after random time (30 to 90 minutes) 
+    async reloginIfNeeded() {
+        const minInterval = 30 * 60 * 1000; // 30 minutes
+        const maxInterval = 90 * 60 * 1000; // 90 minutes
+        const now = Date.now();
+
+        if (!this.lastLoginTime) {
+            this.lastLoginTime = now;
+            return false; // No need to relogin on first check
+        }
+        const timeSinceLastLogin = now - this.lastLoginTime;
+        if (timeSinceLastLogin > browserUtils.randomInt(minInterval, maxInterval)) {
+            logger.info('Session expired based on time - re-logging in');
+            const loginSuccess = await this.login(this.page);
+            if (loginSuccess) {
+                this.lastLoginTime = Date.now();
+                return true;
+            } else {
+                logger.error('Re-login failed');
+                return false;
+            }
+        }
+        return false; // No relogin needed
     }
 
     async validateJobsPage() {

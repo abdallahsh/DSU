@@ -17,7 +17,7 @@ export class JobDirectService extends BrowserService {
             await this.setupPage(newPage);
             
             logger.info(`Opening job URL in new tab: ${jobInfo.href}`);
-            await newPage.goto(jobInfo.href, { waitUntil: 'networkidle0' });
+            await newPage.goto(jobInfo.href);
 
             
 
