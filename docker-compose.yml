@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    environment:
+      - NODE_ENV=production
+      - HEADLESS=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      # Optionally provide REDIS_URL via env or an .env file
+      - REDIS_URL=${REDIS_URL}
+    volumes:
+      - ./user_data:/usr/src/app/user_data
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 512M
+    shm_size: '1gb'
+    restart: unless-stopped

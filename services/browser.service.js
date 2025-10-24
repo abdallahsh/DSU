@@ -309,14 +309,14 @@ export class BrowserService {
 
                 await browserUtils.randomDelay(1000, 3000);
                 
-                // Validate the page content
-                if (url.includes('/jobs/') || url.includes('/search/')) {
-                    const isValid = await this.validateJobsPage();
-                    if (!isValid) {
-                        logger.warn('Page validation failed - will retry navigation');
-                        throw new Error('Invalid page state after navigation');
-                    }
-                }
+                // // Validate the page content
+                // if (url.includes('/jobs/') || url.includes('/search/')) {
+                //     const isValid = await this.validateJobsPage();
+                //     if (!isValid) {
+                //         logger.warn('Page validation failed - will retry navigation');
+                //         throw new Error('Invalid page state after navigation');
+                //     }
+                // }
                 
                 return true;
             } catch (error) {
