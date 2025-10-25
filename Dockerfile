@@ -37,13 +37,14 @@ RUN npm ci --only=production
 # Copy application sources
 COPY . .
 
-# Create a non-root user and set ownership
-RUN useradd -m -d /home/appuser -s /bin/bash appuser && \
-    chown -R appuser:appuser /usr/src/app
+# Create a non-root user and group, then set ownership
+RUN groupadd appgroup && \
+    useradd -m -d /home/appuser -s /bin/bash -g appgroup appuser && \
+    chown -R appuser:appgroup /usr/src/app
 
 # Create and set permissions for user_data directory
 RUN mkdir -p /usr/src/app/user_data && \
-    chown -R appuser:appuser /usr/src/app/user_data && \
+    chown -R appuser:appgroup /usr/src/app/user_data && \
     chmod 755 /usr/src/app/user_data
 
 USER appuser
