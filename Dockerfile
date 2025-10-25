@@ -45,7 +45,7 @@ RUN groupadd appgroup && \
 # Create and set permissions for user_data directory
 RUN mkdir -p /usr/src/app/user_data && \
     chown -R appuser:appgroup /usr/src/app/user_data && \
-    chmod 755 /usr/src/app/user_data
+    chmod 777 /usr/src/app/user_data
 
 USER appuser
 
