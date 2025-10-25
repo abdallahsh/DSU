@@ -41,7 +41,7 @@ export const config = {
       defaultViewport: null,
       timeout: 120000
     },
-    userDataDir: './user_data',
+    userDataDir: '/tmp/chrome-user-data',
     // Make headless default to true unless explicitly set to 'false'
     headless: process.env.HEADLESS !== 'false',
   },

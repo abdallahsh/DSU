@@ -34,7 +34,7 @@ export class BrowserService {
     }
 
     ensureUserDataDir() {
-        const userDataDir = path.join(process.cwd(), config.browser.userDataDir);
+        const userDataDir = '/tmp/chrome-user-data';
         if (!fs.existsSync(userDataDir)) {
             fs.mkdirSync(userDataDir, { recursive: true });
         }
