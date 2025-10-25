@@ -42,11 +42,6 @@ RUN groupadd appgroup && \
     useradd -m -d /home/appuser -s /bin/bash -g appgroup appuser && \
     chown -R appuser:appgroup /usr/src/app
 
-# Create and set permissions for user_data directory
-RUN mkdir -p /usr/src/app/user_data && \
-    chown -R appuser:appgroup /usr/src/app/user_data && \
-    chmod 777 /usr/src/app/user_data
-
 USER appuser
 
 # Environment variables for Puppeteer/Chromium
@@ -55,9 +50,6 @@ ENV CHROME_BIN=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV DISPLAY=:99
 ENV NODE_OPTIONS="--max-old-space-size=512"
-
-# Persistent browser profile
-VOLUME ["/usr/src/app/user_data"]
 
 # Setup entrypoint
 COPY --chown=appuser:appgroup docker-entrypoint.sh /usr/local/bin/
