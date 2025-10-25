@@ -60,7 +60,7 @@ ENV NODE_OPTIONS="--max-old-space-size=512"
 VOLUME ["/usr/src/app/user_data"]
 
 # Setup entrypoint
-COPY --chown=appuser:appuser docker-entrypoint.sh /usr/local/bin/
+COPY --chown=appuser:appgroup docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
