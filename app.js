@@ -110,4 +110,4 @@ const app = express();
 
 app.get("/", (req, res) => res.send("✅ DSU Bot is running"));
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server is running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`Server is running on port ${port}`));
