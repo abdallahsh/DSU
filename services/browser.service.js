@@ -148,14 +148,42 @@ export class BrowserService {
         try {
             logger.info('Starting URL extraction process...');
             
-            // Wait for either job cards or job links to appear with a longer timeout
+            // Log current URL for debugging
+            const currentUrl = await this.page.url();
+            logger.info('Current page URL:', currentUrl);
+            
+            // Take a screenshot for debugging
+            await this.page.screenshot({ path: '/tmp/jobs-page.png' });
+            
+            // Wait longer for the page to load and stabilize
+            await this.page.waitForFunction(() => {
+                return document.readyState === 'complete' && 
+                       !document.querySelector('.loading') &&
+                       !document.querySelector('.air3-loader');
+            }, { timeout: 60000 });
+            
+            // Try multiple selector combinations
+            const selectors = [
+                '[data-test="job-tile"]',
+                'article.job-tile',
+                'section.job-list',
+                'a[href*="/jobs/"]'
+            ];
+            
+            // Log what elements we find
+            for (const selector of selectors) {
+                const count = await this.page.$$eval(selector, elements => elements.length);
+                logger.info(`Found ${count} elements matching selector: ${selector}`);
+            }
+            
+            // Wait for either job cards or job links with longer timeout
             const jobElementPromises = [
                 this.page.waitForSelector('[data-test="job-tile"]', { 
-                    timeout: 30000,
+                    timeout: 60000,
                     visible: true 
                 }).catch(() => null),
                 this.page.waitForSelector('a[href*="/jobs/"]', { 
-                    timeout: 30000,
+                    timeout: 60000,
                     visible: true 
                 }).catch(() => null)
             ];
@@ -163,9 +191,10 @@ export class BrowserService {
             const results = await Promise.all(jobElementPromises);
             if (!results[0] && !results[1]) {
                 logger.warn('No job elements found on the page');
-                // Validate if we're actually on the correct page
-                const currentUrl = await this.page.url();
-                logger.debug('Current URL:', currentUrl);
+                
+                // Get page content for debugging
+                const content = await this.page.content();
+                logger.debug('Page content:', content.substring(0, 500)); // First 500 chars
                 return [];
             }
             
@@ -495,6 +524,18 @@ export class BrowserService {
                 }
 
                 logger.info('Login successful');
+                
+                // Navigate to jobs page after successful login
+                logger.info('Navigating to jobs page...');
+                await this.navigateToUrl(config.browser.jobsUrl);
+                
+                // Wait for job page to load
+                await page.waitForFunction(() => {
+                    return document.readyState === 'complete' && 
+                           !document.querySelector('.loading') &&
+                           !document.querySelector('.air3-loader');
+                }, { timeout: 60000 });
+                
                 return true;
 
             } catch (error) {
