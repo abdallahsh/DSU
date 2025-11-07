@@ -141,6 +141,7 @@ export class BrowserService {
         await page.setDefaultTimeout(config.browser.defaultTimeout);
         await page.setDefaultNavigationTimeout(config.browser.navigationTimeout);
         await page.setUserAgent(config.browser.userAgent);
+        await page.emulateTimezone('Africa/Cairo');
     }
 
     async extractUrls() {
