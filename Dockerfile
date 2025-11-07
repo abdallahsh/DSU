@@ -1,39 +1,38 @@
 ### Dockerfile with Xvfb support for headless browser
-FROM node:18
+# Use a lightweight Node.js image
+FROM node:18-alpine
 
+# Install Chromium and other dependencies
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    xvfb
+
+# Set working directory
 WORKDIR /usr/src/app
 
-# Install Chromium and Xvfb
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
-    xvfb \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    xauth \
-    xvfb \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy package files first to leverage cache
+# Copy package files first
 COPY package*.json ./
+
+# Install dependencies
 RUN npm install --production
 
-# Copy application sources
+# Copy the rest of your app
 COPY . .
 
+# Set environment variables for Puppeteer
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    CHROME_BIN=/usr/bin/chromium-browser \
+    DISPLAY=:99
+
+# Expose the port
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Run the app
+CMD ["node", "app.js"]
